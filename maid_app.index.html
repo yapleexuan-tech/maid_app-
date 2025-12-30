@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>钟点女佣预约系统</title>
+    <style>
+        :root { --primary: #007bff; --danger: #dc3545; --bg: #f4f4f9; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; }
+        
+        /* 导航栏 */
+        nav { background: white; width: 100%; padding: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: flex; justify-content: center; gap: 20px; }
+        button { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; transition: 0.3s; font-size: 14px; }
+        .role-btn { background: #e0e0e0; color: #333; }
+        .role-btn.active { background: var(--primary); color: white; }
+        
+        /* 容器 */
+        .container { max-width: 800px; width: 90%; margin-top: 20px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); display: none; }
+        .container.active { display: block; }
+        
+        h2 { border-bottom: 2px solid var(--primary); padding-bottom: 10px; color: #333; }
+        
+        /* 表单与列表 */
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        .action-btn { background: var(--primary); color: white; margin-top: 10px; }
+        .delete-btn { background: var(--danger); color: white; padding: 5px 10px; font-size: 12px; }
+        
+        /* 列表样式 */
+        ul { list-style: none; padding: 0; }
+        li { background: #f9f9f9; border-bottom: 1px solid #eee; padding: 10px; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* 顾客选时间界面 */
+        .date-selector { margin-bottom: 20px; }
+        .slots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin-top: 15px; }
+        .slot-card { border: 1px solid #ddd; padding: 10px; text-align: center; border-radius: 5px; cursor: pointer; position: relative; }
+        .slot-card:hover { border-color: var(--primary); background: #f0f8ff; }
+        .slot-card.booked { background: #eee; color: #999; cursor: not-allowed; pointer-events: none; border-color: #ddd; }
+        .slot-card .price { color: var(--danger); font-weight: bold; font-size: 0.9em; }
+        
+        .notification { position: fixed; top: 20px; right: 20px; background: #4caf50; color: white; padding: 10px 20px; border-radius: 5px; display: none; }
+    </style>
+</head>
+<body>
+
+    <!-- 模拟身份切换 -->
+    <nav>
+        <button class="role-btn active" onclick="switchRole('customer')">我是顾客</button>
+        <button class="role-btn" onclick="switchRole('admin')">我是Admin (管理员)</button>
+    </nav>
+
+    <!-- 顾客界面 -->
+    <div id="customer-view" class="container active">
+        <h2>📅 预约钟点女佣</h2>
+        
+        <div class="form-group">
+            <label>选择日期:</label>
+            <input type="date" id="booking-date" onchange="renderCustomerSlots()">
+        </div>
+
+        <div id="slots-area">
+            <p style="color:#666">请选择日期查看可用的工人与时段...</p>
+        </div>
+    </div>
+
+    <!-- Admin 界面 -->
+    <div id="admin-view" class="container">
+        <h2>🛠️ 管理后台</h2>
+        
+        <!-- 价格设置 -->
+        <div class="form-group" style="background: #f0f8ff; padding: 10px; border-radius: 5px;">
+            <label>统一每小时价格 (RM):</label>
+            <div style="display:flex; gap:10px;">
+                <input type="number" id="base-price" value="25">
+                <button class="action-btn" style="margin:0;" onclick="updatePrice()">更新价格</button>
+            </div>
+        </div>
+
+        <!-- 增加工人 -->
+        <div class="form-group">
+            <h3>添加新工人</h3>
+            <input type="text" id="new-maid-name" placeholder="工人名字 (如: Siti, Amy)">
+            <button class="action-btn" onclick="addMaid()">+ 添加工人</button>
+        </div>
+
+        <!-- 工人列表 -->
+        <h3>工人名单</h3>
+        <ul id="maid-list"></ul>
+
+        <!-- 订单管理 -->
+        <h3>订单清单 (点击取消)</h3>
+        <ul id="booking-list"></ul>
+    </div>
+
+    <div id="notification" class="notification">操作成功</div>
+
+    <script>
+        // --- 模拟数据库数据 ---
+        let appData = {
+            pricePerHour: 30, // 默认价格
+            maids: [
+                { id: 1, name: "Amy (擅长清洁)" },
+                { id: 2, name: "Siti (擅长煮饭)" },
+                { id: 3, name: "Kak Lisa (全能)" }
+            ],
+            // 预设时段 (09:00 - 18:00)
+            timeSlots: ["09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00"],
+            // 已存在的订单
+            bookings: [
+                // 格式: { id: 123, maidId: 1, date: "2023-10-27", time: "09:00", customer: "王先生" }
+            ]
+        };
+
+        // --- 初始化 ---
+        document.getElementById('booking-date').valueAsDate = new Date();
+        document.getElementById('base-price').value = appData.pricePerHour;
+        renderAdminView();
+        renderCustomerSlots();
+
+        // --- 界面切换逻辑 ---
+        function switchRole(role) {
+            document.querySelectorAll('.role-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.container').forEach(con => con.classList.remove('active'));
+            
+            if(role === 'admin') {
+                document.getElementById('admin-view').classList.add('active');
+                document.querySelectorAll('.role-btn')[1].classList.add('active');
+                renderAdminView(); // 刷新后台数据
+            } else {
+                document.getElementById('customer-view').classList.add('active');
+                document.querySelectorAll('.role-btn')[0].classList.add('active');
+                renderCustomerSlots(); // 刷新前台数据
+            }
+        }
+
+        function showNotify(msg) {
+            const noti = document.getElementById('notification');
+            noti.innerText = msg;
+            noti.style.display = 'block';
+            setTimeout(() => noti.style.display = 'none', 2000);
+        }
+
+        // ================= ADMIN 功能 =================
+
+        function updatePrice() {
+            const newPrice = document.getElementById('base-price').value;
+            appData.pricePerHour = parseInt(newPrice);
+            showNotify(`价格已调整为 RM ${newPrice}/小时`);
+        }
+
+        function addMaid() {
+            const nameInput = document.getElementById('new-maid-name');
+            if(!nameInput.value) return alert("请输入名字");
+            
+            appData.maids.push({
+                id: Date.now(),
+                name: nameInput.value
+            });
+            nameInput.value = "";
+            renderAdminView();
+            showNotify("工人添加成功");
+        }
+
+        function deleteMaid(id) {
+            if(confirm("确定要删除这个工人吗？")) {
+                appData.maids = appData.maids.filter(m => m.id !== id);
+                renderAdminView();
+            }
+        }
+
+        function cancelBooking(bookingId) {
+            if(confirm("确定取消此订单？顾客将收到通知。")) {
+                appData.bookings = appData.bookings.filter(b => b.id !== bookingId);
+                renderAdminView();
+                showNotify("订单已取消");
+            }
+        }
+
+        function renderAdminView() {
+            // 渲染工人列表
+            const maidList = document.getElementById('maid-list');
+            maidList.innerHTML = appData.maids.map(m => `
+                <li>
+                    <span>👤 ${m.name}</span>
+                    <button class="delete-btn" onclick="deleteMaid(${m.id})">删除</button>
+                </li>
+            `).join('');
+
+            // 渲染订单列表
+            const bookingList = document.getElementById('booking-list');
+            if(appData.bookings.length === 0) {
+                bookingList.innerHTML = '<li style="color:#999">暂无订单</li>';
+            } else {
+                bookingList.innerHTML = appData.bookings.map(b => {
+                    const maid = appData.maids.find(m => m.id === b.maidId);
+                    const maidName = maid ? maid.name : "未知工人";
+                    return `
+                    <li>
+                        <div>
+                            <strong>📅 ${b.date} ${b.time}</strong><br>
+                            工人: ${maidName} | 价格: RM${b.price}
+                        </div>
+                        <button class="delete-btn" onclick="cancelBooking(${b.id})">取消订单</button>
+                    </li>
+                `}).join('');
+            }
+        }
+
+        // ================= CUSTOMER 功能 =================
+
+        function renderCustomerSlots() {
+            const date = document.getElementById('booking-date').value;
+            const container = document.getElementById('slots-area');
+            
+            if(!date) return;
+
+            // 核心逻辑：生成 "时间段 x 工人" 的网格
+            // 实际上应该显示每个时间段，然后列出该时间段有空的工人
+            
+            let html = `<h3>${date} 可选时段 (单价: RM${appData.pricePerHour}/hr)</h3><div class="slots-grid">`;
+            
+            appData.timeSlots.forEach(time => {
+                appData.maids.forEach(maid => {
+                    // 检查是否已被预订
+                    const isBooked = appData.bookings.some(b => 
+                        b.date === date && 
+                        b.time === time && 
+                        b.maidId === maid.id
+                    );
+
+                    if(isBooked) {
+                        html += `
+                            <div class="slot-card booked">
+                                <div>${time}</div>
+                                <div>${maid.name}</div>
+                                <div style="font-size:12px">已预订</div>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="slot-card" onclick="bookSlot('${date}', '${time}', ${maid.id}, '${maid.name}')">
+                                <div style="font-weight:bold; font-size:1.1em">${time}</div>
+                                <div>${maid.name}</div>
+                                <div class="price">RM ${appData.pricePerHour}</div>
+                            </div>
+                        `;
+                    }
+                });
+            });
+
+            html += `</div>`;
+            container.innerHTML = html;
+        }
+
+        function bookSlot(date, time, maidId, maidName) {
+            const confirmMsg = `确认预订信息：\n\n日期: ${date}\n时间: ${time}\n工人: ${maidName}\n价格: RM ${appData.pricePerHour}\n\n点击确定进行预订。`;
+            
+            if(confirm(confirmMsg)) {
+                // 创建订单
+                appData.bookings.push({
+                    id: Date.now(),
+                    maidId: maidId,
+                    date: date,
+                    time: time,
+                    price: appData.pricePerHour,
+                    customer: "当前顾客" // 实际开发中这里是登录用户的ID
+                });
+                
+                showNotify("预约成功！");
+                renderCustomerSlots(); // 刷新界面显示已占用
+            }
+        }
+
+    </script>
+</body>
+</html>
